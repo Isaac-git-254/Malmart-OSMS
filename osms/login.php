@@ -1,37 +1,39 @@
 <?php
-session_start();
-$host = 'localhost:3307';
- // Update to 'localhost:3307' if you changed your port earlier
-$user = 'root';
-$pass = '';
-$dbname = 'shop_db';
+declare(strict_types=1);
+
+require __DIR__ . '/bootstrap.php';
+
 $error = '';
 
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $user, $pass);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die("Database connection failed.");
-}
-
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    $username = trim($_POST['username'] ?? '');
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verify_csrf_token();
+    $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
 
-    if (!empty($username) && !empty($password)) {
-        // Pull the user details matching the typed username
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
-        $stmt->execute([$username]);
-        $user_record = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!is_string($username) || !is_string($password) || trim($username) === '' || $password === '') {
+        $error = 'Enter a valid username and password.';
+    } else {
+        $statement = db()->prepare('SELECT id, username, password_hash, role FROM users WHERE username = ?');
+        $statement->execute([trim($username)]);
+        $record = $statement->fetch();
 
-        // Verify the typed password matches the encrypted database hash
-        if ($user_record && password_verify($password, $user_record['password_hash'])) {
-            $_SESSION['user'] = $user_record['username'];
+        if ($record && password_verify($password, $record['password_hash'])) {
+            if (password_needs_rehash($record['password_hash'], PASSWORD_DEFAULT)) {
+                $update = db()->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+                $update->execute([password_hash($password, PASSWORD_DEFAULT), $record['id']]);
+            }
+
+            session_regenerate_id(true);
+            $_SESSION['user'] = [
+                'id' => (int) $record['id'],
+                'username' => $record['username'],
+                'role' => $record['role'],
+            ];
             header('Location: index.php');
             exit;
-        } else {
-            $error = 'Invalid username or password!';
         }
+
+        $error = 'Invalid username or password.';
     }
 }
 ?>
@@ -40,27 +42,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuickShop | Login</title>
+    <title>Mallmart | Login</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header><div class="navbar"><h1 onclick="window.location.href='index.php'" style="cursor:pointer;">Mallmart</h1></div></header>
-
-    <div class="auth-container">
-        <form class="auth-form" method="POST" action="login.php">
-            <h2>Account Login</h2>
-            <?php if ($error): ?><p class="error-msg"><?php echo $error; ?></p><?php endif; ?>
-            <div class="form-group">
-                <label>Username</label>
-                <input type="text" name="username" required placeholder="Enter username">
-            </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" name="password" required placeholder="Enter password">
-            </div>
-            <button type="submit" class="checkout-btn">Login</button>
-            <p style="margin-top:1rem; font-size:0.9rem; text-align:center;">New customer? <a href="register.php">Register here</a></p>
-        </form>
-    </div>
+<header><nav class="navbar"><a class="brand" href="index.php">Mallmart</a><a href="index.php">Back to shop</a></nav></header>
+<main class="auth-container">
+    <form class="auth-form" method="post" action="login.php">
+        <h1>Account Login</h1>
+        <?php if ($error !== ''): ?><p class="error-msg" role="alert"><?= h($error) ?></p><?php endif; ?>
+        <input type="hidden" name="csrf_token" value="<?= h(csrf_token()) ?>">
+        <div class="form-group">
+            <label for="username">Username</label>
+            <input id="username" type="text" name="username" required maxlength="50" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter username">
+        </div>
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input id="password" type="password" name="password" required maxlength="255" autocomplete="current-password" placeholder="Enter password">
+        </div>
+        <button type="submit" class="checkout-btn">Login</button>
+        <p class="form-footnote">New customer? <a href="register.php">Create an account</a></p>
+    </form>
+</main>
 </body>
 </html>
